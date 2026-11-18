@@ -186,3 +186,24 @@ func TestLeaf_KeyRemovedEntirely(t *testing.T) {
 		t.Errorf("old_field.After = %q, want \"null\"", got.After)
 	}
 }
+
+func TestLeaf_UnknownOmittedFromAfterStillReported(t *testing.T) {
+	// create-like shape: Terraform leaves unknown values out of After.
+	change := &tfjson.Change{
+		Before:       nil,
+		After:        map[string]any{"name": "new"},
+		AfterUnknown: map[string]any{"id": true, "name": false},
+	}
+
+	attrs := Leaf(change)
+	got, ok := attrByPath(attrs, "id")
+	if !ok {
+		t.Fatalf("expected diff for id, attrs = %+v", attrs)
+	}
+	if got.Before != "null" || got.After != "(known after apply)" {
+		t.Errorf("id diff = %+v, want null -> (known after apply)", got)
+	}
+	if _, ok := attrByPath(attrs, "name"); !ok {
+		t.Errorf("expected diff for name, attrs = %+v", attrs)
+	}
+}

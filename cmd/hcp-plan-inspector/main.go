@@ -61,10 +61,11 @@ Apply / Discard / Cancel など状態を変更する API は呼びません。Ap
 HCP Terraform 上で人間が Confirm Apply して行ってください。
 
 update / replace のリソースは、変更される属性を
-"属性: 変更前 -> 変更後" の形で表示します (create / delete は量が多いため一覧のみ)。
+"属性: 変更前 -> 変更後" の形で表示します (create / delete は量が多いため一覧のみ。
+--full を付けると create / delete も属性を表示します)。
 sensitive とマークされた値は "(sensitive)" に伏せて表示します。
 長い値や多数の差分は省略されるので、全件見るには --full を付けてください
-(--json は常に省略しません)。
+(--json は常に省略しません。--json でも create / delete の属性を見たい場合は --full を併用してください)。
 
 トークンは以下の順で探します。見つからない場合は ` + "`terraform login`" + ` を案内して終了します。
   1. 環境変数 TF_TOKEN_app_terraform_io
@@ -111,7 +112,7 @@ organization は --org か環境変数 TFC_ORG で指定してください。
 	cmd.Flags().BoolVar(&opts.jsonOut, "json", false, "機械可読な JSON で出力する")
 	cmd.Flags().BoolVar(&opts.rawOut, "raw", false, "構造化ログの生データを出力する")
 	cmd.Flags().BoolVar(&opts.noDetail, "no-detail", false, "属性差分を取得しない (速くなる)")
-	cmd.Flags().BoolVar(&opts.full, "full", false, "差分の行数・値の長さを省略せずに表示する")
+	cmd.Flags().BoolVar(&opts.full, "full", false, "差分の行数・値の長さを省略せずに表示し、create / delete の属性も表示する")
 
 	return cmd
 }
@@ -147,7 +148,7 @@ func runInspect(ctx context.Context, stdout, stderr io.Writer, prNumber string, 
 
 	results := make([]model.RunResult, 0, len(runIDs))
 	for _, id := range runIDs {
-		result, err := inspectRun(ctx, stderr, client, opts.org, id, !opts.noDetail)
+		result, err := inspectRun(ctx, stderr, client, opts.org, id, !opts.noDetail, opts.full)
 		if err != nil {
 			return err
 		}
@@ -183,7 +184,7 @@ func runRaw(ctx context.Context, stdout io.Writer, client *tfc.Client, runIDs []
 	return nil
 }
 
-func inspectRun(ctx context.Context, stderr io.Writer, client *tfc.Client, org, runID string, showDetail bool) (model.RunResult, error) {
+func inspectRun(ctx context.Context, stderr io.Writer, client *tfc.Client, org, runID string, showDetail, detailAll bool) (model.RunResult, error) {
 	run, err := client.FetchRun(ctx, runID)
 	if err != nil {
 		return model.RunResult{}, err
@@ -199,7 +200,7 @@ func inspectRun(ctx context.Context, stderr io.Writer, client *tfc.Client, org, 
 			return model.RunResult{}, err
 		}
 
-		if showDetail && hasUpdateOrReplace(events) {
+		if showDetail && hasDetailTarget(events, detailAll) {
 			jsonOutput := client.FetchPlanJSONOutput(ctx, run.PlanID)
 			if jsonOutput.Warning != "" {
 				fmt.Fprintln(stderr, "警告:", jsonOutput.Warning)
@@ -208,14 +209,23 @@ func inspectRun(ctx context.Context, stderr io.Writer, client *tfc.Client, org, 
 		}
 	}
 
-	return model.Build(org, *run, events, excerpt, plan), nil
+	return model.Build(org, *run, events, excerpt, plan, detailAll), nil
 }
 
-func hasUpdateOrReplace(events []tfc.LogEvent) bool {
+// hasDetailTarget reports whether any planned change needs the JSON plan
+// output for its attribute diff, so runs without one skip the extra fetch.
+func hasDetailTarget(events []tfc.LogEvent, detailAll bool) bool {
 	for _, ev := range events {
-		if ev.Type == "planned_change" && ev.Change != nil &&
-			(ev.Change.Action == "update" || ev.Change.Action == "replace") {
+		if ev.Type != "planned_change" || ev.Change == nil {
+			continue
+		}
+		switch ev.Change.Action {
+		case "update", "replace":
 			return true
+		case "create", "delete":
+			if detailAll {
+				return true
+			}
 		}
 	}
 	return false

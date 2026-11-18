@@ -23,7 +23,8 @@ type ChangeCounts struct {
 }
 
 // Change is one planned resource change, with its attribute-level diff when
-// available (only computed for update/replace actions).
+// available (computed for update/replace actions, and also for create/delete
+// when requested).
 type Change struct {
 	Action  string           `json:"action"`
 	Address string           `json:"address"`
@@ -58,8 +59,10 @@ type RunResult struct {
 // raw-log excerpt (only set when there were no structured events), and its
 // plan's resource changes when the JSON output could be fetched (nil
 // otherwise - update/replace changes then list only their address, with no
-// attribute diff).
-func Build(org string, run tfc.RunInfo, events []tfc.LogEvent, excerpt string, plan *tfjson.Plan) RunResult {
+// attribute diff). detailAll also computes the attribute diff for
+// create/delete actions, which is otherwise skipped because it lists every
+// attribute.
+func Build(org string, run tfc.RunInfo, events []tfc.LogEvent, excerpt string, plan *tfjson.Plan, detailAll bool) RunResult {
 	byAddress := map[string]*tfjson.ResourceChange{}
 	for _, rc := range planResourceChanges(plan) {
 		byAddress[rc.Address] = rc
@@ -91,7 +94,7 @@ func Build(org string, run tfc.RunInfo, events []tfc.LogEvent, excerpt string, p
 		}
 		action := ev.Change.Action
 		attrs := []diff.Attribute{}
-		if action == "update" || action == "replace" {
+		if action == "update" || action == "replace" || (detailAll && (action == "create" || action == "delete")) {
 			if rc, ok := byAddress[ev.Change.Resource.Addr]; ok && rc.Change != nil {
 				attrs = diff.Leaf(rc.Change)
 			}
