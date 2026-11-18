@@ -1,7 +1,7 @@
 // Package diff computes leaf-level attribute differences for a Terraform
-// plan's update/replace resource changes, mirroring the jq `leaf_diff`
-// function of the original shell script this tool was ported from: it
-// walks every scalar leaf path present in either the before or after value,
+// plan's resource changes, mirroring the jq `leaf_diff` function of the
+// original shell script this tool was ported from: it walks every scalar
+// leaf path present in the before, after, or after_unknown value,
 // masks anything marked sensitive on either side, and reports
 // unknown-after-apply values instead of a stale "known" value.
 package diff
@@ -23,10 +23,10 @@ type Attribute struct {
 	ForcesReplacement bool   `json:"forces_replacement"`
 }
 
-// Leaf computes the leaf-level attribute differences for change. It is only
-// meaningful for "update" and "replace" actions: "create"/"delete" touch
-// every attribute, so the caller should skip calling this for those actions
-// and just list the resource address instead.
+// Leaf computes the leaf-level attribute differences for change. It is
+// mainly meant for "update" and "replace" actions; "create"/"delete" touch
+// every attribute, so callers usually just list the resource address unless
+// the full attribute list was explicitly requested.
 func Leaf(change *tfjson.Change) []Attribute {
 	before := orEmptyObject(change.Before)
 	after := orEmptyObject(change.After)
@@ -35,7 +35,9 @@ func Leaf(change *tfjson.Change) []Attribute {
 	unknown := orEmptyObject(change.AfterUnknown)
 	replacePaths := toPathList(change.ReplacePaths)
 
-	paths := unionLeafPaths(before, after)
+	// Terraform omits unknown values from "after", so walk after_unknown too:
+	// otherwise attributes like a new resource's id would never show up.
+	paths := unionLeafPaths(before, after, unknown)
 
 	attrs := make([]Attribute, 0, len(paths))
 	for _, path := range paths {
@@ -85,13 +87,14 @@ func orEmptyObject(v any) any {
 	return v
 }
 
-// unionLeafPaths returns the sorted, deduplicated set of paths in before and
-// after whose value is a scalar (string, number, bool, or null) - i.e. the
+// unionLeafPaths returns the sorted, deduplicated set of paths in trees
+// whose value is a scalar (string, number, bool, or null) - i.e. the
 // equivalent of jq's `paths(scalars)`.
-func unionLeafPaths(before, after any) [][]any {
+func unionLeafPaths(trees ...any) [][]any {
 	seen := map[string][]any{}
-	collectLeafPaths(before, nil, seen)
-	collectLeafPaths(after, nil, seen)
+	for _, t := range trees {
+		collectLeafPaths(t, nil, seen)
+	}
 
 	keys := make([]string, 0, len(seen))
 	for k := range seen {

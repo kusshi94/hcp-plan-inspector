@@ -10,7 +10,7 @@ import (
 
 func TestBuild_URLAndBasicFields(t *testing.T) {
 	run := tfc.RunInfo{ID: "run-abc123", Workspace: "example-app_production", Status: "planned_and_finished", HasChanges: true, PlanID: "plan-xyz"}
-	result := Build("example-org", run, nil, "", nil)
+	result := Build("example-org", run, nil, "", nil, false)
 
 	wantURL := "https://app.terraform.io/app/example-org/example-app_production/runs/run-abc123"
 	if result.URL != wantURL {
@@ -28,7 +28,7 @@ func TestBuild_SummaryAndCounts(t *testing.T) {
 	events := []tfc.LogEvent{
 		{Type: "change_summary", Message: "Plan: 0 to add, 8 to change, 0 to destroy.", Changes: &tfc.ChangeCounts{Change: 8, Operation: "plan"}},
 	}
-	result := Build("example-org", tfc.RunInfo{}, events, "", nil)
+	result := Build("example-org", tfc.RunInfo{}, events, "", nil, false)
 
 	if result.Summary == nil || *result.Summary != "Plan: 0 to add, 8 to change, 0 to destroy." {
 		t.Fatalf("Summary = %v, want the change_summary message", result.Summary)
@@ -56,7 +56,7 @@ func TestBuild_UpdateGetsAttributeDiffFromPlan(t *testing.T) {
 		},
 	}
 
-	result := Build("example-org", tfc.RunInfo{}, events, "", plan)
+	result := Build("example-org", tfc.RunInfo{}, events, "", plan, false)
 
 	if len(result.Changes) != 1 {
 		t.Fatalf("len(Changes) = %d, want 1", len(result.Changes))
@@ -82,7 +82,7 @@ func TestBuild_CreateActionHasNoDiffEvenWithPlanAvailable(t *testing.T) {
 		},
 	}
 
-	result := Build("example-org", tfc.RunInfo{}, events, "", plan)
+	result := Build("example-org", tfc.RunInfo{}, events, "", plan, false)
 	if len(result.Changes) != 1 || len(result.Changes[0].Diff) != 0 {
 		t.Fatalf("Changes = %+v, want create action with empty diff", result.Changes)
 	}
@@ -93,20 +93,65 @@ func TestBuild_DiagnosticsDeduplicated(t *testing.T) {
 		{Type: "diagnostic", Diagnostic: &tfc.Diagnostic{Severity: "warning", Summary: "deprecated"}},
 		{Type: "diagnostic", Diagnostic: &tfc.Diagnostic{Severity: "warning", Summary: "deprecated"}},
 	}
-	result := Build("example-org", tfc.RunInfo{}, events, "", nil)
+	result := Build("example-org", tfc.RunInfo{}, events, "", nil, false)
 	if len(result.Diagnostics) != 1 {
 		t.Fatalf("len(Diagnostics) = %d, want 1 (deduplicated)", len(result.Diagnostics))
 	}
 }
 
 func TestBuild_LogExcerptOnlySetWhenNonEmpty(t *testing.T) {
-	result := Build("example-org", tfc.RunInfo{}, nil, "", nil)
+	result := Build("example-org", tfc.RunInfo{}, nil, "", nil, false)
 	if result.LogExcerpt != nil {
 		t.Errorf("LogExcerpt = %v, want nil for empty excerpt", result.LogExcerpt)
 	}
 
-	result = Build("example-org", tfc.RunInfo{}, nil, "boom", nil)
+	result = Build("example-org", tfc.RunInfo{}, nil, "boom", nil, false)
 	if result.LogExcerpt == nil || *result.LogExcerpt != "boom" {
 		t.Errorf("LogExcerpt = %v, want \"boom\"", result.LogExcerpt)
+	}
+}
+
+func TestBuild_CreateActionGetsDiffWhenRequested(t *testing.T) {
+	events := []tfc.LogEvent{
+		{Type: "planned_change", Change: &tfc.PlannedChange{Action: "create", Resource: struct {
+			Addr string `json:"addr"`
+		}{Addr: "aws_instance.new"}}},
+	}
+	plan := &tfjson.Plan{
+		ResourceChanges: []*tfjson.ResourceChange{
+			{Address: "aws_instance.new", Change: &tfjson.Change{After: map[string]any{"ami": "ami-1"}}},
+		},
+	}
+
+	result := Build("example-org", tfc.RunInfo{}, events, "", plan, true)
+	if len(result.Changes) != 1 {
+		t.Fatalf("len(Changes) = %d, want 1", len(result.Changes))
+	}
+	d := result.Changes[0].Diff
+	if len(d) != 1 || d[0].Path != "ami" || d[0].Before != "null" || d[0].After != `"ami-1"` {
+		t.Fatalf("Changes[0].Diff = %+v, want ami: null -> \"ami-1\"", d)
+	}
+}
+
+func TestBuild_DeleteActionGetsDiffWhenRequested(t *testing.T) {
+	events := []tfc.LogEvent{
+		{Type: "planned_change", Change: &tfc.PlannedChange{Action: "delete", Resource: struct {
+			Addr string `json:"addr"`
+		}{Addr: "aws_instance.old"}}},
+	}
+	plan := &tfjson.Plan{
+		ResourceChanges: []*tfjson.ResourceChange{
+			{Address: "aws_instance.old", Change: &tfjson.Change{Before: map[string]any{"ami": "ami-1"}}},
+		},
+	}
+
+	if result := Build("example-org", tfc.RunInfo{}, events, "", plan, false); len(result.Changes[0].Diff) != 0 {
+		t.Fatalf("Changes[0].Diff = %+v, want empty without detailAll", result.Changes[0].Diff)
+	}
+
+	result := Build("example-org", tfc.RunInfo{}, events, "", plan, true)
+	d := result.Changes[0].Diff
+	if len(d) != 1 || d[0].Path != "ami" || d[0].Before != `"ami-1"` || d[0].After != "null" {
+		t.Fatalf("Changes[0].Diff = %+v, want ami: \"ami-1\" -> null", d)
 	}
 }

@@ -75,13 +75,13 @@ hcp-plan-inspector --org example-org 123 --json | jq '...'
 ```
 
 `update` / `replace` のリソースは、変更される属性を `属性: 変更前 -> 変更後` の形で表示します
-(`create` / `delete` は変更量が多いため一覧のみ)。destroy / replace されるリソースは実行結果の
+(`create` / `delete` は変更量が多いため一覧のみ。`--full` を付けると `create` / `delete` も属性を表示します)。destroy / replace されるリソースは実行結果の
 末尾でもまとめて件数が出るので見落としにくくなっています。`sensitive` とマークされた値は
 片側だけマークされていても両側とも `(sensitive)` に伏せて表示します。
 
 人間向け出力では、1 リソースあたり 20 行を超える差分と 80 文字を超える値を省略します
 (省略した場合は末尾に案内が出ます)。全件見るには `--full` を付けてください。
-`--json` は常に省略せずに出力します。
+`--json` は常に省略せずに出力します。`--json` でも `create` / `delete` の属性を出したい場合は `--full` を併用してください。
 
 ### Flags
 
@@ -93,12 +93,12 @@ hcp-plan-inspector --org example-org 123 --json | jq '...'
 | `--org <organization>` | organization を指定する (環境変数 `TFC_ORG` でも指定可、いずれか必須) |
 | `--json` | 機械可読な JSON で出力する |
 | `--raw` | 構造化ログの生データを出力する |
-| `--full` | 差分の行数・値の長さを省略せずに表示する (`--json` は常に省略なし) |
-| `--no-detail` | 属性差分 (`update` / `replace` の詳細) を取得しない。workspace 数が多い PR で高速化したいとき向け |
+| `--full` | 差分の行数・値の長さを省略せずに表示し、`create` / `delete` の属性も表示する (`--json` と併用可) |
+| `--no-detail` | 属性差分 (`update` / `replace`、`--full` 時は `create` / `delete` の詳細) を取得しない。workspace 数が多い PR で高速化したいとき向け |
 | `-h`, `--help` | ヘルプを表示する |
 | `-v`, `--version` | バージョンを表示する |
 
-属性差分の取得(`update` / `replace` の詳細)には workspace への **admin 権限**が必要です。
+属性差分の取得(`update` / `replace`、`--full` 時は `create` / `delete` の詳細)には workspace への **admin 権限**が必要です。
 権限が無い場合は警告を出したうえで、リソースの一覧までは表示します。
 
 ### Token

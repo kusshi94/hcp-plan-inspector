@@ -208,7 +208,7 @@ type JSONOutputResult struct {
 }
 
 // FetchPlanJSONOutput fetches the terraform-show-json equivalent of a plan,
-// used to compute per-attribute update/replace diffs. A failure here
+// used to compute per-attribute diffs. A failure here
 // (typically a 403 because the caller lacks admin access to the workspace)
 // is reported via JSONOutputResult.Warning rather than an error, since the
 // resource-level plan summary is still usable without it.
